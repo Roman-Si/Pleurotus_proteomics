@@ -1,0 +1,362 @@
+---
+title: "Batch effect on Pleurotus LC-MS/MS samples"
+author: "Romanos Siaperas"
+date: today
+format: html
+editor: visual
+toc-title: "Sections"
+toc: true
+number-sections: true
+---
+
+# Introduction
+
+This is an analysis to investigate the effect of different experimental and LC-MS/MS batches on the analysis. The two experiment batches include liquid cultures, protein extraction and freeze-drying and were performed by two different persons in the Biotechnology Laboratory (NTUA, Greece). The two different MS batches have differences in both peptide purification and LC-MS/MS. **No batch correction was performed**.
+
+## Experimental design
+
+The MS depends on the different batches analyzed by VIB. There are 3 different projects but PRC-5442 and PRC-5590 have identical sample preparation (PRC-5590 had just some extra cleaning steps) and MS section and were analyzed in 2021-08 and 2022-01 respectively so will be set in the same MS batch. PRC-6063 was analyzed in 2023-06.
+
+| Sample | Batch    | Experiment | VIB project | Filename                   |
+|--------|----------|------------|-------------|----------------------------|
+| bw_1   | exp2_ms2 | Rom        | 6063        | B28553_10ul_IonOpt_PRC6063 |
+| bw_2   | exp2_ms2 | Rom        | 6063        | B28543_10ul_IonOpt_PRC6063 |
+| bw_3   | exp2_ms2 | Rom        | 6063        | B28545_10ul_IonOpt_PRC6063 |
+| cs_1   | exp1_ms1 | Maria      | 5590        | E28115_5ul_PAC_PRC5590     |
+| cs_2   | exp1_ms2 | Maria      | 6063        | B28547_10ul_IonOpt_PRC6063 |
+| cs_3   | exp1_ms2 | Maria      | 6063        | B28549_10ul_IonOpt_PRC6063 |
+| xyl_1  | exp1_ms1 | Maria      | 5442        | E26698_3ul_PAC_PRC5442     |
+| xyl_2  | exp1_ms1 | Maria      | 5442        | E26704_3ul_PAC_PRC5442     |
+| xyl_3  | exp2_ms2 | Rom        | 6063        | B28551_10ul_IonOpt_PRC6063 |
+
+## Differences in LC-MS/MS analysis
+
+Pending, will come from the M&M sections.
+
+## Batch correction
+
+Some notes about batch correction and proteomics.
+
+1.  Batch correction is performed after normalization and is suggested at the peptide before protein aggregation ([10.15252/msb.202110240](https://doi.org/10.15252/msb.202110240)). You apply the correction at the level your signal is.
+2.  Only appropriate method for batch correction of intensity data like proteomics and microarrays is ComBat. ComBat needs imputation, does not accept missing values in a given batch. We artificially change the majority of our data since we have many missing values in DDA LFQ.
+3.  Batch corrected data can not be tested for differential abundance analysis.
+    -   Quoting Li et al. ([10.1093/biostatistics/kxab039](https://doi.org/10.1093/biostatistics/kxab039)):
+
+        Batch correction introduces a correlation structure in the corrected data, which, if ignored, may lead to either exaggerated or diminished significance in downstream applications such as differential expression analysis. In a typical batch adjustment, the batch mean and/or variance are estimated using all the data points in the particular batch, and then this estimated batch mean is subtracted from each data point in the batch. This means that the adjusted data points within each batch are correlated with each other and that leads to exaggerated significance in the tests of differential expression.
+
+    -   Quoting Nygaard et al. ([10.1093/biostatistics/kxv027](https://doi.org/10.1093/biostatistics/kxv027){.uri}):
+
+        Some tools therefore have the option of preserving the difference between study groups, e.g. using a two-way ANOVA model to simultaneously estimate both group and batch effects. Unfortunately, this approach may systematically induce incorrect group differences in downstream analyses when groups are distributed between the batches in an unbalanced manner.
+
+    -   See also discussion in Biostars <https://www.biostars.org/p/266507/#280157>
+4.  Will proceed with standard quantitative analysis and will include the batches at the lm model as covariates when testing differential expression following Gordon Smyth's comment <https://support.bioconductor.org/p/36029/#100297> .
+
+# Analysis
+
+## Libraries and functions
+
+```{r}
+#| label: load_libraries
+#| echo: true 
+#| output: false 
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+library(limma)
+library(prolfqua)
+
+library(SummarizedExperiment)
+library(BatchQC)
+library(imputeLCMD)
+library(PCAtools)
+
+library(RscriptsForProteomics)
+```
+
+```{r}
+#| label: functions
+#| echo: true 
+#| output: false 
+
+
+# Imputes the peptide dataframe with the given method, creates a summarized experiment and assigns the 3 different batch types
+impute_se <- function(data, impute_method) {
+   
+  if (impute_method == "MinProb") {
+        data <- impute.MinProb(data)
+  }
+  if (impute_method == "MinDet") {
+        data <- impute.MinDet(data)
+  }
+  
+  se_object <- BatchQC::summarized_experiment(data, batches)
+  SummarizedExperiment::assayNames(se_object) <- "log_intensity"
+  
+  se_object <- BatchQC::batch_correct(se = se_object, method = "ComBat", assay_to_normalize = "log_intensity", batch = "comb_batch",
+                                    covar = c("condition"), output_assay_name = "Combat_comb")
+  se_object <- BatchQC::batch_correct(se = se_object, method = "ComBat", assay_to_normalize = "log_intensity", batch = "ms_batch",
+                                    covar = c("condition"), output_assay_name = "Combat_ms")
+  se_object <- BatchQC::batch_correct(se = se_object, method = "ComBat", assay_to_normalize = "log_intensity", batch = "exp_batch",
+                                    covar = c("condition"), output_assay_name = "Combat_exp")
+
+  return(se_object)
+}
+
+
+
+plot_variation <- function(se_object) {
+  p1 <- BatchQC::EV_plotter(batchqc_ev = batchqc_explained_variation(se = se_object,batch = "comb_batch", 
+                                                                   condition = "condition", assay_name = "log_intensity")[[1]]) +  labs(title = "Combined batch uncorrected")
+p3 <- BatchQC::EV_plotter(batchqc_ev = batchqc_explained_variation(se = se_object,batch = "ms_batch", 
+                                                                   condition = "condition", assay_name = "log_intensity")[[1]])  + labs(title = "MS batch uncorrected")
+p5 <- BatchQC::EV_plotter(batchqc_ev = batchqc_explained_variation(se = se_object,batch = "exp_batch", 
+                                                                   condition = "condition", assay_name = "log_intensity")[[1]]) +   labs(title = "Experiment batch uncorrected")
+p2 <- BatchQC::EV_plotter(batchqc_ev = batchqc_explained_variation(se = se_object,batch = "comb_batch", 
+                                                                   condition = "condition", assay_name = "Combat_comb")[[1]]) +  labs(title = "Combined batch corrected")
+p4 <- BatchQC::EV_plotter(batchqc_ev = batchqc_explained_variation(se = se_object,batch = "ms_batch", 
+                                                                   condition = "condition", assay_name = "Combat_ms")[[1]])  + labs(title = "MS batch corrected")
+p6 <- BatchQC::EV_plotter(batchqc_ev = batchqc_explained_variation(se = se_object,batch = "exp_batch", 
+                                                                   condition = "condition", assay_name = "Combat_exp")[[1]]) +   labs(title = "Experiment batch corrected")
+
+ gridExtra::grid.arrange(p1, p2, p3, p4, p5, p6)
+}
+```
+
+## Load in prolfqua
+
+Read the SDRF and parse save the sample-batches relationship in a dataframe for later use.
+
+```{r}
+#| label: parse_sdrf
+#| echo: true 
+
+# read sdrf
+sdrf <- read.delim("data/MS/sdrf.tsv")
+sdrf <- sdrf %>%
+  mutate(project = gsub(".*PRC([0-9]*)\\.raw", "\\1", comment.data.file.),
+         ms_batch = if_else(project == "6063", 2, 1),
+         exp_batch = if_else(factor.value.substrate. == "beachwood", 2, 1), 
+         exp_batch = if_else(factor.value.substrate. == "xylose" & project == "6063", 2, exp_batch)
+  )
+
+# create the sample-batches dataframe
+batches <- data.frame(row.names = gsub( "\\.raw", "", sdrf$comment.data.file.) )
+batches$ms_batch <- as.factor(sdrf$ms_batch)
+batches$exp_batch <- as.factor(sdrf$exp_batch)
+batches$condition  <- as.factor(gsub(" ", "", sdrf$factor.value.substrate.))
+batches$comb_batch <-  as.factor(paste0("e", batches$exp_batch, "_m", batches$ms_batch))
+batches
+```
+
+Now load in prolfqua. The PRC-6063 samples have a lower intensity, this will be treated in the robscaled normalization.
+
+```{r}
+#| label: fig-raw_data
+#| fig-cap: "Density of raw peptide intensities"
+#| echo: true 
+
+data <- read.csv("data/MS/sdrf_openms_design_msstats_in.csv.gz")
+lfqdata <- create_lfqdata(data)
+knitr::kable(lfqdata$hierarchy_counts(), caption = "number of proteins and peptides.")
+
+# raw density plot
+lfqdata$get_Plotter()$intensity_distribution_density() 
+
+```
+
+This is the PCA of the robscaled peptide intensities. However PCA discards all peptides with missing values using only 1.7% of them.
+
+```{r}
+#| label: fig-pca_pep
+#| fig-cap: "PCA of robscaled peptide intensities"
+#| echo: true
+
+lt <- lfqdata$get_Transformer()
+lfqdataPeptideNorm <- lt$log2()$robscale()$lfq 
+
+lfqdataPeptideNorm$get_Plotter()$pca()
+
+
+pep_data <- data.frame(lfqdataPeptideNorm$to_wide()$data)
+
+pep_df <- data.frame(lfqdataPeptideNorm$to_wide()$data)[,c(4:12)]
+rownames(pep_df) <- data.frame(lfqdataPeptideNorm$to_wide()$data)$peptide_Id
+
+paste0(na.omit(pep_df) %>% nrow()," peptides are quantified in all 9 samples and used for PCA (", round(na.omit(pep_df) %>% nrow() / pep_df %>% nrow() * 100, 1), "%)" )
+```
+
+## Confounding of batches and substrate
+
+The confounding of the different batches with the biological condition is the following. Experimental batches have the highest confounding since only xylose has replicates performed in separate experiments.
+
+```{r}
+#| label: batch_confounding
+#| echo: true
+
+
+se_object <- BatchQC::summarized_experiment(pep_df, batches)
+SummarizedExperiment::assayNames(se_object) <- "log_intensity"
+BatchQC::confound_metrics(se = se_object, batch = "condition")
+```
+
+## Imputation of missing values
+
+### Without filtering
+
+There are a lot of missing values of course but ComBat can not handle them so will impute with 2 different methods. MinDet which replaces missing values with the minimum value of the sample and MinProb which generates a (normal?) distribution around the minimum value.
+
+First threw peptides present in less than 2 samples. This will affect samples with many missing values and completely change their distribution, let's see number of NaN values in each sample
+
+```{r}
+#| label: fig-densities
+#| fig-subcap:
+#|   - "No imputation"
+#|   - "MinDet imputation"
+#|   - "MinProb imputation"
+#| layout-ncol: 1
+#| layout-nrow: 3
+#| column: page
+#| echo: true
+
+cat("There are", nrow(pep_df), "peptides in total.\nLet's count NaN in each sample")
+
+colSums(is.na(pep_df))
+
+cols =   c("darkorange1", "coral2", "coral4", "yellow", "greenyellow", "green4", "purple1", "slateblue", "slategrey")
+limma::plotDensities(pep_df, col =cols, legend = FALSE)
+limma::plotDensities(impute.MinDet(pep_df), col = cols, legend = FALSE)
+limma::plotDensities(impute.MinProb(pep_df), col = cols, legend = FALSE)
+```
+
+Corn stover sampels and xylose_3 have very few peptides and imputation shifts them a lot to the left.
+
+### With filtering
+
+Will filter for peptides with \<= 4 missing values (less than half).
+
+```{r}
+#| label: filter_impute
+#| echo: true 
+#| output: false 
+
+# Allow only 4 missing values per peptide
+pep_df <- pep_df[rowSums(is.na(pep_df)) <= 5, ]
+
+se_object_md <- impute_se(pep_df, "MinDet")
+se_object_mp <- impute_se(pep_df, "MinProb")
+
+```
+
+## BatchQC
+
+These plots are interesting but remember that more than 50% of the peptide intensities are imputed.
+
+-   The experimental and MS batch separate explain less variance than the biological condition.
+
+-   The experimental batch explains slightly more variance than the MS-sampling batch. Remember that this batch is more confounded with the biological condition.
+
+-   The combination of them explains more, similar to the biological conditions.
+
+```{r}
+#| label: fig-variance
+#| fig-subcap:
+#|   - "MinDet"
+#|   - "MinProb"
+#| layout-ncol: 1
+#| layout-nrow: 2
+#| column: page
+#| echo: false
+
+plot_variation(se_object_md)
+plot_variation(se_object_mp)
+
+```
+
+As expected strong correlation of the bw samples. MinDet method has stronger correlation since all MVs are replaced with a single value. The e1_m1 samples cluster together but the cs_1 is quite distinct.
+
+```{r}
+#| label: fig-cor_mindet
+#| fig-cap: "Heatmap correlation after MinDet"
+#| echo: false
+
+heatmaps <- BatchQC::heatmap_plotter(se = se_object_md, assay = "log_intensity",
+                                     nfeature = 38, annotation_column = c("comb_batch", "condition"),
+                                     log_option = "FALSE")
+heatmap_cor_md <- heatmaps$correlation_heatmap
+heatmap_cor_md
+
+```
+
+```{r}
+#| label: fig-cor_minprob
+#| fig-cap: "Heatmap correlation after MinProb"
+#| echo: false
+
+heatmaps <- BatchQC::heatmap_plotter(se = se_object_mp, assay = "log_intensity",
+                                     nfeature = 38, annotation_column = c("comb_batch", "condition"),
+                                     log_option = "FALSE")
+heatmap_cor_mp <- heatmaps$correlation_heatmap
+heatmap_cor_mp
+```
+
+## Protein aggregation
+
+Let's plot the PCAs of the robscaled peptide intensities and the Tukey's median polish summarized protein intensities.
+
+```{r}
+#| label: protein_level
+#| echo: true
+#| output: false
+
+# protein aggregation
+mp_df <- protein_aggregation(lfqdataPeptideNorm)
+# PCAtools wants the columns in the same order as the metadata rownames for some reason
+mp_df_reordered <- mp_df[, c(2:10)][, match(rownames(batches), colnames(mp_df[, c(2:10)]))]
+
+p <- PCAtools::pca(na.omit(mp_df_reordered), metadata = batches, removeVar = 0.1)
+pca_plot <- PCAtools::biplot(p, colby = "condition", shape = 'comb_batch',
+                 labSize = 5, pointSize = 5, legendPosition = "right")
+
+horn <- parallelPCA(na.omit(mp_df_reordered))
+elbow <- findElbowPoint(p$variance)
+scree_plot <- PCAtools::screeplot(p,
+                    components = getComponents(p, 1:20),
+                    vline = c(horn$n, elbow)) +
+  
+  geom_label(aes(x = horn$n + 0.5, y = 50,
+                 label = 'Horn\'s', vjust = -1, size = 8)) +
+  geom_label(aes(x = elbow + 1, y = 30,
+                 label = 'Elbow method', vjust = -1, size = 8))
+```
+
+We see that protein aggregation groups replicates just fine without extra batch correction.
+
+```{r}
+#| label: fig-pca_prot
+#| fig-cap: "PCA of protein intensities"
+#| echo: false
+
+
+paste0(na.omit(mp_df_reordered) %>% nrow()," proteins are quantified in all 9 samples and used for PCA (", round(na.omit(mp_df_reordered) %>% nrow() / mp_df_reordered %>% nrow() * 100, 1), "%)" )
+
+pca_plot
+
+```
+
+But again there are just 182 proteins present in all 9 samples, is PCA representative? Naah, and it seems two principal components are not enough as we see here.
+
+```{r}
+#| label: fig-screeplot
+#| fig-cap: "How many PCs explain the variance?"
+#| echo: false
+
+
+
+scree_plot
+```
+
+## Sumary
+
+No batch correction, daa
