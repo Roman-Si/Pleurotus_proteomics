@@ -2,7 +2,9 @@
 title: "Batch effect on Pleurotus LC-MS/MS samples"
 author: "Romanos Siaperas"
 date: today
-format: html
+format: 
+  html:
+    self-contained: true
 editor: visual
 toc-title: "Sections"
 toc: true
@@ -137,7 +139,7 @@ sdrf <- read.delim("data/MS/sdrf.tsv")
 sdrf <- sdrf %>%
   mutate(project = gsub(".*PRC([0-9]*)\\.raw", "\\1", comment.data.file.),
          ms_batch = if_else(project == "6063", 2, 1),
-         exp_batch = if_else(factor.value.substrate. == "beachwood", 2, 1), 
+         exp_batch = if_else(factor.value.substrate. == "beechwood", 2, 1), 
          exp_batch = if_else(factor.value.substrate. == "xylose" & project == "6063", 2, exp_batch)
   )
 
@@ -156,6 +158,7 @@ Now load in prolfqua. The PRC-6063 samples have a lower intensity, this will be 
 #| label: fig-raw_data
 #| fig-cap: "Density of raw peptide intensities"
 #| echo: true 
+#| warning: false
 
 data <- read.csv("data/MS/sdrf_openms_design_msstats_in.csv.gz")
 lfqdata <- create_lfqdata(data)
@@ -172,6 +175,7 @@ This is the PCA of the robscaled peptide intensities. However PCA discards all p
 #| label: fig-pca_pep
 #| fig-cap: "PCA of robscaled peptide intensities"
 #| echo: true
+#| warning: false
 
 lt <- lfqdata$get_Transformer()
 lfqdataPeptideNorm <- lt$log2()$robscale()$lfq 
@@ -194,6 +198,7 @@ The confounding of the different batches with the biological condition is the fo
 ```{r}
 #| label: batch_confounding
 #| echo: true
+#| warning: false
 
 
 se_object <- BatchQC::summarized_experiment(pep_df, batches)
@@ -337,6 +342,7 @@ We see that protein aggregation groups replicates just fine without extra batch 
 #| label: fig-pca_prot
 #| fig-cap: "PCA of protein intensities"
 #| echo: false
+#| warning: false
 
 
 paste0(na.omit(mp_df_reordered) %>% nrow()," proteins are quantified in all 9 samples and used for PCA (", round(na.omit(mp_df_reordered) %>% nrow() / mp_df_reordered %>% nrow() * 100, 1), "%)" )
@@ -359,4 +365,4 @@ scree_plot
 
 ## Sumary
 
-No batch correction, daa
+No batch correction, daa. Will add the batches as covariates in the linear model when testing for differential abundance.
