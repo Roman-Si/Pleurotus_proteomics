@@ -1,0 +1,562 @@
+---
+title: "Quantitative proteomic analysis"
+author: "Romanos Siaperas"
+date: today
+format: 
+  html:
+    self-contained: true
+editor: visual
+toc-title: "Sections"
+toc: true
+number-sections: true
+---
+
+## Introduction
+
+This is the quantitative proteomics analysis. Includes reading the output files of [quantms](https://quantms.org/home) and quantitative analysis with [prolfqua](https://github.com/fgcz/prolfqua). I have already functions doing these tasks gathered in the [Rscripts_for_proteomics](https://github.com/Roman-Si/Rscripts_for_proteomics) package.
+
+The MS data are available in PXD065010 PRIDE project.
+
+### Experimental setup
+
+For an extended analysis of batches see the corresponding quarto and HTML documents.
+
+Samples were prepared in 2 different batches in the Biotechnology Laboratory from Romanos and Maria (NTUA, Greece) and analyzed in different batches from the VIB Proteomics Core facility with label-free LC-MS/MS (VIB, Belgium). There are 3 different VIB projects but PRC-5442 and PRC-5590 have identical sample preparation (PRC-5590 had just some extra cleaning steps) and MS section and were analyzed in 2021-08 and 2022-01 respectively so will be set in the same MS batch. PRC-6063 was analyzed in 2023-06.
+
+| Sample | Batch    | Experiment | VIB project | Filename                   |
+|--------|----------|------------|-------------|----------------------------|
+| bw_1   | exp2_ms2 | Rom        | 6063        | B28553_10ul_IonOpt_PRC6063 |
+| bw_2   | exp2_ms2 | Rom        | 6063        | B28543_10ul_IonOpt_PRC6063 |
+| bw_3   | exp2_ms2 | Rom        | 6063        | B28545_10ul_IonOpt_PRC6063 |
+| cs_1   | exp1_ms1 | Maria      | 5590        | E28115_5ul_PAC_PRC5590     |
+| cs_2   | exp1_ms2 | Maria      | 6063        | B28547_10ul_IonOpt_PRC6063 |
+| cs_3   | exp1_ms2 | Maria      | 6063        | B28549_10ul_IonOpt_PRC6063 |
+| xyl_1  | exp1_ms1 | Maria      | 5442        | E26698_3ul_PAC_PRC5442     |
+| xyl_2  | exp1_ms1 | Maria      | 5442        | E26704_3ul_PAC_PRC5442     |
+| xyl_3  | exp2_ms2 | Rom        | 6063        | B28551_10ul_IonOpt_PRC6063 |
+
+### The MS data
+
+-   The mzTab file sdrf_openms_design_openms.mzTab.gz
+
+-   The msstats input file sdrf_openms_design_msstats_in.csv.gz
+
+-   The proteome fasta file used for the analysis
+
+The mass spectrometry proteomics data have been deposited to the ProteomeXchange Consortium via the PRIDE ​(Perez-Riverol et al., 2022)​ partner repository with the dataset identifier PXD065010 and 10.6019/PXD065010.
+
+**When published will add links to download the files from PRIDE ftp and a script to download all data.**
+
+### The analysis
+
+We have **three conditions** with three replicates each. The conditions are:
+
+-   secretome after growth with xylose
+
+-   secretome after growth with beechwood
+
+-   secretome after growth with corn stover
+
+The steps:
+
+-   Get some info about proteins and PTMs from mzTab
+
+-   Import peptide level intensities in prolfqua
+
+-   Normalization at peptide level
+
+-   Protein aggregation
+
+-   Differential protein abundance testing
+
+-   Filter reliably quantified proteins
+
+## Load libraries and data
+
+```{r}
+#| label: load_libraries
+#| echo: true 
+#| output: false 
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(ggVennDiagram)
+library(GGally)
+
+library(limma)
+library(prolfqua)
+library(DEP)
+library(PCAtools)
+
+library(RscriptsForProteomics)
+
+# mzTab
+mzt <-"data/MS/sdrf_openms_design_openms.mzTab.gz"
+# msstats input
+data <- read.csv("data/MS/sdrf_openms_design_msstats_in.csv.gz", header = TRUE, sep = ',')
+head(data, 1)
+data$Reference <-  paste0(data$Condition, "_r", data$BioReplicate)
+head(data, 2)
+```
+
+These two functions parse the mzTab and msstats_input to get some stats for each protein like number of PSMs, peptides etc. There are 2 different columns with peptide count:
+
+-   opt_global_nr_found_peptides: Number of peptidoforms with PSMs, each different PTM combination is counted
+
+-   nr_unmodified_peptides: Number of quantified peptides taken from msstats_input. Each peptide with and without PTMs is counted only once
+
+-   peptide_index: The min and max index of the aminoacid sequence with quantified peptides
+
+```{r}
+#| echo: true 
+
+### Take mzTab info
+prot_info <- extract_protein_stats(mzt)
+head(prot_info, 2)
+proteomicslfq_ids_to_keep <- get_proteinIds_from_proteomicslfq(mzt)
+
+### Take peptide info
+pep_info <- extract_peptides_per_protein(strip_ptms_from_msstats_in("data/MS/sdrf_openms_design_msstats_in.csv.gz"), "../genome/annotation/proteins.fasta.gz")
+head(pep_info, 2)
+merged_info <- merge(prot_info, pep_info, by = "protein_Id", all = TRUE)
+
+save_gzipped_csv(data.frame(merged_info), "results/MS/unfiltered_MS_data.csv.gz")
+```
+
+## Peptide level analysis
+
+### PTMs
+
+Will plot the frequency of each post-translational modification separate and then all possible combinations of them. This info will be taken from the mzTab file.
+
+```{r}
+#| label: fig-PTMs
+#| layout-ncol: 1
+#| layout-nrow: 2
+#| fig-subcap:
+#|   -  "Frequency of each separate PTM"
+#|   - "Frequency of each combination of PTMs"
+#| column: page
+#| echo: true
+
+
+count_peptide_modifications(mzt,  plot_type = "separate")
+count_peptide_modifications(mzt,  plot_type = "mixed")
+
+```
+
+### EDA peptide-level
+
+Import peptide intensities in prolfqua and make some exploratory plots. First will plot cumulative missing values per peptide and the peptide intensities for each biological condition for peptides with 0-2 missing values.
+
+```{r}
+#| echo: true 
+#| output: false 
+
+# Import msstats input in prolfqua 
+lfqdata <- create_lfqdata(data)
+# not needed in the output of quantms but anyway
+lfqdata$remove_small_intensities()
+
+# raw density plot
+density_raw_pep <- lfqdata$get_Plotter()$intensity_distribution_density() 
+
+# missing values per group
+p1_mv <- lfqdata$get_Summariser()$plot_missingness_per_group()
+p2_mv <- lfqdata$get_Plotter()$missigness_histogram() 
+```
+
+```{r}
+#| echo: true 
+
+knitr::kable(lfqdata$hierarchy_counts(), caption = "number of proteins and peptides.")
+```
+
+```{r}
+#| label: fig-pepMVs
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Cumulative peptide MVs per condition"
+#|   - "Density of peptides with 0, 1 or 2 MVs per condition."
+#| echo: true
+#| warning: false
+
+p1_mv 
+p2_mv
+```
+
+Beechwood is the only condition where all 3 replicates were analyzed in the same batch and has normal distributions. Corn stover in the contrary has two tail distributions for the populations with missing values. This is because the PRC-6063 samples are left-shifted compared to the others (see peptidy densities before normalization as well).
+
+```{r}
+#| echo: true 
+#| output: false 
+stats <- lfqdata$get_Stats()
+prolfqua::table_facade( stats$stats_quantiles()$wide, paste0("quantile of ",stats$stat ))
+p1 <- stats$density_median()
+p2 <-  stats$violin()
+```
+
+Same picture here with the coefficient of variation with corn_stover being the most diverse condition and beechwood the most stable.
+
+```{r}
+#| label: fig-pepCV
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Density of most/least variable peptides"
+#|   - "Violit plot of peptide coefficient of variation"
+#| echo: true
+#| warning: false
+
+p1 
+p2
+```
+
+Next, peptide abundances are log2 transformed and robust z-score scaled using the method robscale.
+
+```{r}
+#| label: fig-normalized
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Density of raw peptide intensities"
+#|   - "Density of log2 robscaled peptide intensities"
+#| echo: true
+#| warning: false
+
+lt <- lfqdata$get_Transformer()
+lfqdataPeptideNorm <- lt$log2()$robscale()$lfq 
+
+density_raw_pep
+pl <-  lfqdataPeptideNorm$get_Plotter()
+pl$intensity_distribution_density()
+```
+
+```{r}
+#| label: fig-pepPCA
+#| fig-cap: "Biplot of PC1 and PC2 principal componenets based on peptide intensities. Analysis is based on ?? peptides present in all 9 samples."
+#| include: true
+
+pl$pca()
+
+pep_data <- data.frame(lfqdataPeptideNorm$to_wide()$data)
+save_gzipped_csv(data.frame(pep_data), "results/MS/robscaled_peptide_intensities.csv.gz")
+
+pep_df <- data.frame(lfqdataPeptideNorm$to_wide()$data)[,c(4:12)]
+rownames(pep_df) <- data.frame(lfqdataPeptideNorm$to_wide()$data)$peptide_Id
+paste0(na.omit(pep_df) %>% nrow()," peptides are quantified in all 9 samples and used for PCA (", round(na.omit(pep_df) %>% nrow() / pep_df %>% nrow() * 100, 1), "%)" )
+```
+
+This is the PCA of the robscaled peptide intensities where only beechwood replicates cluster together.. However PCA discards all peptides with missing values using only 1.7% of them.
+
+## Protein-level analysis
+
+### Protein aggregation
+
+Protein intensities were estimated from peptide intensities using Tukey’s median polish (TMP). However, TMP summarization creates artifacts in cases where all peptides of a protein are detected uniquely in single samples, yielding misleading uniform protein intensities across all samples. This phenomenon is previously reported in microarray data summarization ​(Giorgi et al., 2010)​. For proteins affected by this artifact, median summarization of the top three peptides was employed instead.
+
+Filtered for reliably quantified proteins -\> proteins present in at least 2 replicates of at least one condition.
+
+```{r}
+#| echo: true 
+#| output: false 
+
+# protein aggregation
+mp_df <- protein_aggregation(lfqdataPeptideNorm)
+# keep one protein per protein group
+mp_df <- filter_for_leading_protein(mp_df, proteomicslfq_ids_to_keep)
+save_gzipped_csv(data.frame(mp_df), "results/MS/protein_intensities.csv.gz")
+# save the reliably quantified proteins in a vector for later
+mp_df_quant <- filter_proteins_by_replicates(mp_df, c("beechwood", "corn_stover", "xylose"), 2)
+
+
+```
+
+### EDA plots
+
+#### Protein level
+
+An interesting observation is that protein aggregation manages to overcome the batch artifacts and separate conditions. This was not achieved at the peptide level \@fig-pepPCA.
+
+However:
+
+-   only 182 proteins without missing values are used in PCA analysis
+
+-   The first two PCs do not capture enough variability
+
+Still we will confirm that substrate is the driving force of variation in the DE analysis step as well.
+
+```{r}
+#| echo: true 
+#| output: false 
+
+
+quantified_proteins <- mp_df_quant$protein_Id
+rownames(mp_df_quant) <- mp_df_quant$protein_Id
+mp_df_quant <- mp_df_quant[,c(2:(length(data$Reference %>% unique()) + 1))]
+metadata <- data.frame(row.names = colnames(mp_df_quant))
+metadata$Condition <- gsub("^(.*)_r.*$",  "\\1", colnames(mp_df_quant))
+p <- PCAtools::pca(na.omit(mp_df_quant), metadata = metadata, removeVar = 0.1)
+horn <- parallelPCA(na.omit(mp_df_quant))
+elbow <- findElbowPoint(p$variance)
+```
+
+```{r}
+#| label: fig-protPCA
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Biplot of the PC1 and PC2 based on 182 proteins without missing values."
+#|   - "Scree plot of the accumulative proportion of explained variation. Optimum number of PCs to retain based on the Elbow method and Horn's parallel analysis are highlighted."
+#| echo: true
+#| warning: false
+
+PCAtools::biplot(p, colby = "Condition",  title = "PCA of prolfqua robscaled - TMP or top3 summarized protein intensities", 
+                 subtitle = "Filtered for proteins in >=2 replicates and >=2 peptides\nSame value proteins are summarized with top3 instead of TMP",
+                 labSize = 5,legendPosition = "left", pointSize = 5)
+
+PCAtools::screeplot(p,
+                    components = getComponents(p, 1:20),
+                    vline = c(horn$n, elbow)) +
+  geom_label(aes(x = horn$n, y = 50, label = 'Horn\'s', vjust = -1, size = 8)) +
+  geom_label(aes(x = elbow, y = 30, label = 'Elbow method', vjust = -1, size = 8))
+```
+
+```{r}
+#| label: fig-ggcorr
+#| fig-cap: "Pearson correlation matrix plot based on protein intensities."
+#| include: true
+#| warning: false
+
+GGally::ggcorr(mp_df_quant, method = c("pairwise", "pearson"), label = TRUE, label_round = 2, label_size = 3)
+
+```
+
+The following plots are based on the [DEP](https://bioconductor.org/packages/release/bioc/html/DEP.html) bioconductor package.
+
+```{r}
+#| label: fig-DEPsample
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 2
+#| fig-subcap:
+#|   -  "Protein identification overlap."
+#|   - "Proteins per sample."
+#|   -  "Barplot of the protein identification overlap between samples."
+#|#   - "Heatmap of proteins with missing values. Samples and proteins are clustered based on missing values."
+#| echo: true
+
+protein_intensities <- tibble::rownames_to_column(mp_df_quant, "proteinId")
+condition_cols <- c(2:(length(data$Reference %>% unique()) + 1))
+data_se <- DEP:::make_unique(protein_intensities,"proteinId","proteinId",delim=";")
+exp_design <- data.frame(
+  label =rownames(metadata),
+  condition = metadata$Condition,
+  replicate = rep(c(1:3),3)
+)
+data_se<-DEP:::make_se(data_se, condition_cols ,exp_design)
+
+plot_frequency(data_se) + labs(title = "") + xlab("Number of samples")
+
+plot_numbers(data_se) + labs(title = "") + ylab("Number of proteins") +  theme(legend.position = "none")
+
+plot_coverage(data_se) + labs(title = "")
+
+#plot_missval(data_se) + labs(title = "")
+```
+
+#### Susbstrate level
+
+Again we use the reliably quantified proteins here and take the average of the 3 replicates in each sample. One replicate is enough to consider a protein present in this substrate.
+
+```{r}
+#| label: fig-substrates
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Protein identification overlap."
+#|   - "Proteins per substrate."
+#| echo: true
+
+protein_intensities <- tibble::rownames_to_column(mp_df_quant, "proteinId")
+conditions <- unique(data$Condition)
+
+for (condition in conditions) {
+  condition_cols <- grep(condition, colnames(protein_intensities), value = TRUE)
+  protein_intensities[[paste0(condition, "_s1")]] <- rowMeans(protein_intensities[, condition_cols], na.rm = TRUE)}
+
+condition_cols <- c((length(data$Reference %>% unique()) + 2): (length(data$Reference %>% unique()) + length(conditions) + 1))
+data_se <- DEP:::make_unique(protein_intensities,"proteinId","proteinId",delim=";")
+exp_design <- data.frame(
+  label =paste(conditions, "_s1", sep = ""),
+  condition = conditions,
+  replicate = rep(c(1),3)
+)
+data_se<-DEP:::make_se(data_se, condition_cols ,exp_design)
+
+plot_frequency(data_se) + labs(title = "") + xlab("Number of substrates")
+
+plot_numbers(data_se) + labs(title = "") + ylab("Number of proteins") + theme(legend.position = "none")
+```
+
+```{r}
+#| label: fig-ggVenn
+#| fig-cap: "Overlap of quantified proteins in the different substrates."
+#| include: true
+
+venn_data <- list(
+  xylose = protein_intensities$proteinId[!is.na(protein_intensities[['xylose_s1']])],
+  corn_stover = protein_intensities$proteinId[!is.na(protein_intensities[['corn_stover_s1']])],
+  beechwood = protein_intensities$proteinId[!is.na(protein_intensities[['beechwood_s1']])]
+)
+
+ggVennDiagram(venn_data) +
+  theme(legend.position = 'none',
+        legend.text = element_text(size = 24)) 
+```
+
+```{r}
+#| label: fig-dendrogram
+#| fig-cap: "Euclidean clustering dendrogram"
+#| include: true
+
+
+transposed_data <- t(mp_df_quant)
+dist_matrix <- dist(transposed_data, method = "euclidean")
+hclust_result <- hclust(dist_matrix, method = "complete")
+plot(hclust_result, hang = -1, main = "")
+```
+
+### Differential abundance analysis
+
+-   We import the protein intensities in prolfqua to perform the differential abundance testing
+
+-   We apply the limma moderated t-test for DE analysis. We do an ordinary t-test and then moderate the standard errors accros proteins - we squeeze them towards a common value using a simple Bayesian model.
+
+-   We filter for reliably quantified proteins only after running the tests since the unreliable ones contribute to the limit of detection (LOD) estimation (see [prolfqua](https://doi.org/10.1021/acs.jproteome.2c00441) publication's supplementary file).
+
+-   The MS batches are also inserted as covariates in the linear model.
+
+```{r}
+#| echo: true 
+#| output: false 
+
+# turn the protein intensities in long format and import in prolfqua
+long_df <- data.frame(mp_df) %>%
+  tidyr::pivot_longer(cols = -protein_Id, names_to = "Reference", 
+                      values_to = "Intensity", values_drop_na = TRUE)
+
+annot <- data.frame(colnames(mp_df %>% select(-contains('protein_Id')))) %>%
+  mutate(
+    Reference = colnames(mp_df %>% select(-contains('protein_Id'))), 
+    Run = c(1:9),
+    Condition = gsub("^(.*)_r.*$", "\\1", colnames(mp_df %>% select(-contains('protein_Id')))),
+    replicate = gsub("^.*_r([1-9])$", "\\1", colnames(mp_df %>% select(-contains('protein_Id')))),
+    Batch = c("e2_m2","e2_m2","e2_m2","e1_m1", "e1_m2","e1_m2","e1_m1","e1_m1","e2_m2")
+  ) %>% 
+  select(Reference, Run, Condition, replicate, Batch)
+
+startdata <- dplyr::inner_join(long_df, annot, by = "Reference")
+lfqdata <- create_lfqdata(startdata, response_level = "protein", proteinId_column = "protein_Id" , extra_factor = "Batch" )
+
+pl <-  lfqdata$get_Plotter()
+p1_mv <- lfqdata$get_Summariser()$plot_missingness_per_group()
+p2_mv <- pl$missigness_histogram() + labs(tag = "B)")
+```
+
+The two tails we saw in the peptide densities are almost eliminated after protein aggregation. In all 3 conditions we see a separation between proteins with 0 and with 2 missing values. We check because to test proteins missing in a condition for differential abundance we assume missingness is associated with lower intensity and impute using the average (or median, check paper) intensity of proteins with 2 missing values in the same condition (see [prolfqua](https://doi.org/10.1021/acs.jproteome.2c00441) publication's supplementary file).
+
+```{r}
+#| label: fig-protMVs
+#| column: page
+#| layout-ncol: 2
+#| layout-nrow: 1
+#| fig-subcap:
+#|   -  "Cumulative protein MVs per condition"
+#|   - "Density of proteins with 0, 1 or 2 MVs per condition."
+#| echo: true
+#| warning: false
+
+p1_mv 
+p2_mv
+```
+
+```{r}
+#| echo: true
+#| output: false
+
+
+formula_Condition <- strategy_lm("Intensity ~ condition_ + extrafactor_", model_name = "lm")
+
+Contrasts <- c("cs - xyl" = "condition_corn_stover - condition_xylose", "bw - xyl" = "condition_beechwood - condition_xylose", "bw - cs" = "condition_beechwood - condition_corn_stover")
+
+mod <- prolfqua::build_model( lfqdata$data, 
+                              formula_Condition,
+                              subject_Id = lfqdata$config$table$hierarchy_keys()) 
+contr <- prolfqua::Contrasts$new(mod, Contrasts)
+v1 <- contr$get_Plotter()$volcano()
+mC <- ContrastsMissing$new(lfqdata = lfqdata, contrasts = Contrasts) 
+merged <- prolfqua::merge_contrasts_results(prefer = contr,add = mC)$merged
+merged <- prolfqua::ContrastsModerated$new(merged) 
+moderated_v1_mc <- merged$get_Plotter()$volcano()
+
+de_test <- moderated_v1_mc$FDR$data 
+de_test <- de_test %>% filter(protein_Id %in% rownames(mp_df_quant)) 
+write.csv(data.frame(de_test),gzfile("results/MS/prolfqua_unfiltered_moderated_v1_mc.csv.gz"), row.names = FALSE)
+```
+
+Here we see that the biological factor (condition) drives variation much more than the experimenta/MS batches (extrafactor). We have already checked this with [BatchQC](https://www.bioconductor.org/packages/release/bioc/html/BatchQC.html) and clustering techniques like PCA and dendrograms.
+
+We see the effect of batch (extrafactor\_) and the much larger effect of substrate (condition\_) in the p-values distribution.
+
+```{r}
+#| label: fig-DE
+#| column: page
+#| layout-ncol: 1
+#| layout-nrow: 2
+#| fig-subcap:
+#|   -  "Histogram of p-values."
+#|   - "Volcano plot of log10 adjusted p-values and log2 fold-change."
+#| echo: true
+#| warning: false
+
+mod$anova_histogram()$plot
+moderated_v1_mc$FDR
+```
+
+We see most induced proteins are in beechwood.
+
+```{r}
+
+comparisons <- c("cs - xyl", "bw - xyl", "bw - cs")
+
+de_results <- data.frame(
+  Comparison = character(),
+  Up = integer(),
+  Down = integer()
+)
+
+for (comp in comparisons) {
+  up_prots <- de_test %>% filter(contrast == comp  & FDR < 0.05  & diff > 0) %>% nrow()
+  down_prots <- de_test %>% filter(contrast == comp  & FDR < 0.05  & diff < 0) %>% nrow()
+  de_results <- rbind(de_results, 
+                      data.frame(Comparison = comp,Up = up_prots,Down = down_prots
+    ))
+}
+
+knitr::kable(de_results, caption = "# of DEPs per comparison.")
+```
+
+```{r}
+#| label: print_libraries
+#| include: true
+
+print(sessionInfo())
+```
