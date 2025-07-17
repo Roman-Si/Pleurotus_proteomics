@@ -1,0 +1,18 @@
+Proteome source,BUSCO proteome,ShortName,Assembly Accession,Organism,Strain,Total Length (Mb),Protein-coding genes
+uniprot,"C:97.5% (S:96.3% D:1.2%) F:1.1% M:1.4%,n:3870",Pleery1,GCA_015484515.1,Pleurotus eryngii (basidiomycete fungi),ATCC:90797,44.61,15897
+gm-es,"C:91.5%[S:90.2%,D:1.3%],F:2.4%,M:6.1%,n:3870",Pletuo1,GCA_036872985.1,Pleurotus tuoliensis (basidiomycete fungi),Ptuo-s1,43.78,13745
+uniparc,"C:85.9% (S:85.1% D:0.8%) F:2.2% M:11.9%,n:3870",Plecor1,GCA_019677325.2,Pleurotus cornucopiae (cornucopia mushroom),CCMSSC00406,32.38,10421
+gm-es,"C:92.7%[S:91.6%,D:1.1%],F:2.4%,M:4.9%,n:3870",Pleflo1,GCA_019395345.1,Pleurotus floridanus (basidiomycete fungi),CCMSSC00406,35.08,12094
+gm-es,"C:91.8%[S:87.1%,D:4.7%],F:2.7%,M:5.5%,n:3870",Plepla1,GCA_003313735.1,Pleurotus platypus (basidiomycete fungi),MG11,39.97,15054
+uniprot,"C:93.9% (S:92.7% D:1.2%) F:3.3% M:2.8%,n:3870",PleostPC15,GCA_000697685.1,Pleurotus ostreatus PC15 (oyster mushroom),PC15,34.34,12186
+uniprot,"C:96.4% (S:95.2% D:1.3%) F:0.6% M:3%,n:3870",PleostPC9,GCF_014466165.1,Pleurotus ostreatus (oyster mushroom),PC9,34.97,11624
+gm-es,"C:84.6%[S:78.2%,D:6.4%],F:5.3%,M:10.1%,n:3870",Plesap1,GCA_026743855.1,Pleurotus sapidus (basidiomycete fungi),DSM:8266,46.88,15471
+genbank,"C:91.5%[S:90.2%,D:1.3%],F:1.1%,M:7.4%,n:3870",PlepulSS2,GCA_012980525.1,Pleurotus pulmonarius (basidiomycete fungi),PM_ss2,39.24,10640
+genbank,"C:98.3%[S:91.4%,D:6.9%],F:0.8%,M:0.9%,n:3870",PlepulLGAM,GCA_047301645.1,Pleurotus pulmonarius (basidiomycete fungi),LGAM 28684,41.11,14485
+genbank,"C:93.6%[S:92.3%,D:1.3%],F:1.0%,M:5.4%,n:3870",PlepulSS5,GCA_012980535.1,Pleurotus pulmonarius (basidiomycete fungi),PM_ss5,39.87,10953
+genbank,"C:93.7%[S:82.0%,D:11.7%],F:0.9%,M:5.4%,n:3870",PlepulSS13,GCA_012979565.1,Pleurotus pulmonarius (basidiomycete fungi),PM_ss13,42.55,11873
+genbank,"C:80.6%[S:51.3%,D:29.3%],F:4.2%,M:15.2%,n:3870",Pledja1,GCA_029747585.1,Pleurotus djamor (basidiomycete fungi),MPG-05,62.54,19702
+gm-es,"C:91.8%[S:87.1%,D:4.7%],F:2.7%,M:5.5%,n:3870",Plesal1,GCA_002583695.1,Pleurotus salmoneostramineus (basidiomycete fungi),N60,39.19,14412
+gm-es,"C:90.0%[S:89.1%,D:0.9%],F:2.9%,M:7.1%,n:3870",Plecit1,GCA_017312325.1,Pleurotus citrinopileatus (basidiomycete fungi),HfpriPC05-1-Y1,38.59,12599
+gm-es,"C:91.0%[S:89.9%,D:1.1%],F:2.5%,M:6.5%,n:3870",Plegig1,GCA_032158425.1,Pleurotus giganteus (basidiomycete fungi),PG46,40.07,13691
+gm-es,"C:91.0%[S:90.3%,D:0.7%],F:2.4%,M:6.6%,n:3870",Pletub1,GCA_014058305.1,Pleurotus tuber-regium (basidiomycete fungi),ACCC 50657-18,35.82,11846
