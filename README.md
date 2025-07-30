@@ -4,8 +4,6 @@ This repository contains code and output files for the proteomics analysis of *P
 
 The analysis is in [Quarto](https://quarto.org/) documents (`.qmd`), with rendered HTML outputs available in the [`docs/`](docs/) directory. These HTML files can be previewed in-browser using [htmlpreview.github.io](https://htmlpreview.github.io/), avoiding the need to download them.
 
-The analysis is in Quarto documents (.qmd), with rendered HTML outputs available in the docs/ directory. These HTML files can be previewed in-browser using htmlpreview.github.io, avoiding the need to download them.
-
 ### Rendered reports
 
 * Quantitative proteomics analysis:
